@@ -773,4 +773,3 @@ static void parse_dns(const u_char *payload, size_t len,
         alert_dns("DNS: high query volume from single host", src_ip);
     }
 }
-```
