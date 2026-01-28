@@ -19,7 +19,6 @@ This script is intended for educational, research, and defensive security purpos
 - Flags potentially malicious packets or connections.  
 - Can be extended or customized to add new detection rules or behaviors.
 
-(Adjust this list to accurately reflect what your script actually does.)
 
 ## Requirements
 
@@ -27,7 +26,6 @@ This script is intended for educational, research, and defensive security purpos
 - Dependencies: (e.g. Python 3.x, Scapy, libpcap, etc.)  
 - Network interface access with sufficient permissions (often requires elevated privileges).
 
-Fill these in with the actual tools and libraries your script needs.
 
 ## Installation
 
@@ -42,7 +40,6 @@ Fill these in with the actual tools and libraries your script needs.
    ```
 3. Configure any required settings (see Configuration).
 
-Update these steps to match your real setup.
 
 ## Configuration
 
