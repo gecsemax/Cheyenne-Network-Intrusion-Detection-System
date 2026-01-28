@@ -1,5 +1,4 @@
-# Cheyenne-Network-Intrusion-Detection-System
-Cheyenne Network Intrusion Detection System 
+# Cheyenne Network Intrusion DetectionSystem
 Cheyenne Network Intrusion System (NIDS)
 =======================================
 
