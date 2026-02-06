@@ -5,7 +5,7 @@ It is aimed to offer a feature set similar to commercial NIDS solutions, but as 
 
 ## Features
 
-- TAP/SPAN‑based passive sniffing using libpcap [web:11]  
+- TAP/SPAN‑based passive sniffing using libpcap.
 - IPv4 parsing with TCP, UDP, and ICMP support  
 - TCP SYN scan detection using time‑windowed per‑host counters  
 - ICMP echo (ping) sweep detection  
@@ -19,15 +19,15 @@ It is aimed to offer a feature set similar to commercial NIDS solutions, but as 
 - HTTPS (TLS) ClientHello parsing with SNI (Server Name Indication) extraction on TCP port 443  
 - Alerts and metadata to:
   - Stdout (human‑readable)
-  - Syslog (`LOG_USER` facility) for SIEM / log pipeline ingestion [web:40]  
+  - Syslog (`LOG_USER` facility) for SIEM / log pipeline ingestion 
 
 ## Requirements
 
 - Linux or other Unix‑like OS with:
-  - `libpcap` development headers and library installed [web:11]  
+  - `libpcap` development headers and library installed.  
   - A network interface that can be opened in promiscuous mode (e.g. `eth0`, `enpXsY`, `tap0`, SPAN port, etc.)  
-- Root or equivalent privileges to capture live traffic [web:11]  
-- Optional: Python 3 if you want to launch it through a small Python wrapper script [web:27].  
+- Root or equivalent privileges to capture live traffic. 
+- Optional: Python 3 if you want to launch it through a small Python wrapper script.  
 
 Example installation of dependencies on Debian/Ubuntu:
 
@@ -71,7 +71,7 @@ sudo ./cheyenne_nids tap0
 
 When running, the program:
 
-- Opens the given interface with `pcap_open_live` in promiscuous mode and snap length 65535 [web:11].  
+- Opens the given interface with `pcap_open_live` in promiscuous mode and snap length 65535 .  
 - Applies a capture filter of `ip` to focus on IPv4 traffic [web:9].  
 - Enters an infinite `pcap_loop`, decoding each packet and:
   - Tracking TCP SYN counts per source
@@ -83,7 +83,7 @@ To stop it, press `Ctrl+C` in the terminal or manage it via your service supervi
 
 ## Usage (from Python wrapper)
 
-You can also launch the sensor from a small Python 3 script, which is convenient for automation, orchestration, or later integration with other Python‑based tooling [web:27][web:28].
+You can also launch the sensor from a small Python 3 script, which is convenient for automation, orchestration, or later integration with other Python‑based tooling.
 
 Create `cheyenne_runner.py` in the repo root:
 
@@ -145,7 +145,7 @@ Example outputs you may see:
   HTTPS SNI 192.0.2.5:54321 -> 198.51.100.10:443 host="example.com"
   ```
 
-All alerts are also sent to syslog under the `cheyenne_nids` ident (`LOG_USER`), so you can forward them to your SIEM or log management stack [web:40].
+All alerts are also sent to syslog under the `cheyenne_nids` ident (`LOG_USER`), so you can forward them to your SIEM or log management stack .
 
 ## Author
 
