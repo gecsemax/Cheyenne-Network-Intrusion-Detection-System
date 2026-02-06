@@ -1,100 +1,168 @@
-# Cheyenne Network Intrusion Detection System
-Cheyenne Network Intrusion System (NIDS)
-=======================================
+```markdown
+# Cheyenne Network Intrusion Detection System (NIDS)
 
-Cheyenne Network Intrusion System is a **network intrusion detection** script designed to monitor network traffic and help identify potential malicious or suspicious activity on a network.
-
-## Purpose
-
-- Inspect network traffic for suspicious patterns or potential attacks.  
-- Help security practitioners test and monitor their own networks.  
-- Generate logs or alerts that can support incident analysis and response.
-
-This script is intended for educational, research, and defensive security purposes on networks you own or are explicitly authorized to monitor.
+Cheyenne is a lightweight, TAP/SPAN‑based passive **network** intrusion detection system written in C on top of libpcap, created by **Max Gecse**. It is aimed to offer a feature set similar to commercial NIDS solutions, but as a free and open‑source project [web:40].
 
 ## Features
 
-- Captures and analyzes network traffic based on configured rules or logic.  
-- Flags potentially malicious packets or connections.  
-- Can be extended or customized to add new detection rules or behaviors.
-
+- TAP/SPAN‑based passive sniffing using libpcap [web:11]  
+- IPv4 parsing with TCP, UDP, and ICMP support  
+- TCP SYN scan detection using time‑windowed per‑host counters  
+- ICMP echo (ping) sweep detection  
+- HTTP request/response line parsing on TCP port 80  
+- DNS over UDP and TCP inspection with tunneling/DGA heuristics:
+  - Long or multi‑label query names
+  - High‑entropy subdomain labels
+  - Heavy TXT/NULL/CNAME usage
+  - Many unique subdomains under the same base domain
+  - High NXDOMAIN rate and high per‑host query volume  
+- HTTPS (TLS) ClientHello parsing with SNI (Server Name Indication) extraction on TCP port 443  
+- Alerts and metadata to:
+  - Stdout (human‑readable)
+  - Syslog (`LOG_USER` facility) for SIEM / log pipeline ingestion [web:40]  
 
 ## Requirements
 
-- Operating system: (e.g. Linux, Windows, etc.)  
-- Dependencies: (e.g. Python 3.x, Scapy, libpcap, etc.)  
-- Network interface access with sufficient permissions (often requires elevated privileges).
+- Linux or other Unix‑like OS with:
+  - `libpcap` development headers and library installed [web:11]  
+  - A network interface that can be opened in promiscuous mode (e.g. `eth0`, `enpXsY`, `tap0`, SPAN port, etc.)  
+- Root or equivalent privileges to capture live traffic [web:11]  
+- Optional: Python 3 if you want to launch it through a small Python wrapper script [web:27].  
 
-
-## Installation
-
-1. Clone this repository:  
-   ```bash
-   git clone https://github.com/<your-username>/cheyenne-nids.git
-   cd cheyenne-nids
-   ```
-2. Install dependencies (example for Python):  
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Configure any required settings (see Configuration).
-
-
-## Configuration
-
-- Edit the configuration file (for example: `config.yaml`, `settings.json`, or variables at the top of the script).  
-- Set parameters such as:
-  - Network interface to monitor  
-  - Log file path  
-  - Detection rules, thresholds, or signatures  
-- Save the configuration before running the script.
-
-## Usage
-
-Example usage (adjust to your script):
+Example installation of dependencies on Debian/Ubuntu:
 
 ```bash
-# Basic usage
-python cheyenne_nids.py
-
-# With options
-python cheyenne_nids.py --interface eth0 --config config.yaml --log logs/alerts.log
+sudo apt-get update
+sudo apt-get install build-essential libpcap-dev python3
 ```
 
-Common usage scenarios:
+## Building
 
-- Continuous monitoring of a specific network interface.  
-- Running in a test lab to simulate and detect attacks.  
-- Collecting logs for later forensic or analytical review.
+Clone the repository and build the C sensor binary:
 
-Describe any important options, such as:
+```bash
+git clone https://github.com/<your-user>/Cheyenne-Network-Intrusion-Detection-System.git
+cd Cheyenne-Network-Intrusion-Detection-System
 
-- `--interface` – which network interface to listen on.  
-- `--config` – path to the configuration file.  
-- `--log` – where to store logs.  
+gcc -o cheyenne_nids cheyenne_nids.c -lpcap
+```
 
-## Legal and Ethical Use
+If your file is named differently (e.g. `nids.c`), adjust the compile command:
 
-- Use this script **only** on networks and systems you own or have explicit permission to test and monitor.  
-- Unauthorized monitoring, interception, or inspection of network traffic may be illegal in your jurisdiction.  
-- You are solely responsible for ensuring that your use of this script complies with all applicable laws, regulations, and policies.
+```bash
+gcc -o cheyenne_nids nids.c -lpcap
+```
 
-## Disclaimer – No Warranty, No Liability
+## Usage (direct, from C binary)
 
-This software is provided **“as is”**, without any warranty, express or implied.  
-This includes, but is not limited to, warranties of merchantability, fitness for a particular purpose, and non-infringement.
+Run Cheyenne on a specific interface (requires root):
 
-By using this script, you acknowledge and agree that:
+```bash
+sudo ./cheyenne_nids <tap_interface>
+```
 
-- You use the Cheyenne Network Intrusion System **entirely at your own risk**.  
-- The owner, author, and contributors **cannot be held liable** for any claim, loss, damage, security incident, data loss, business interruption, or any other consequences arising from the use, misuse, or inability to use this script.  
-- The owner does **not** guarantee that the script will detect all intrusions, prevent attacks, or function without errors.
+Examples:
 
-If you do not agree with these terms, you must not use this software.
+```bash
+sudo ./cheyenne_nids eth0
+sudo ./cheyenne_nids enp3s0
+sudo ./cheyenne_nids tap0
+```
 
-## License
+When running, the program:
 
-This software is licensed under the MIT License.
-See the LICENSE file in this repository for the full license text.
-By using Cheyenne Network Intrusion System, you acknowledge that it is provided “as is”, without warranty of any kind, and that the authors cannot be held liable for any damages arising from its use.
+- Opens the given interface with `pcap_open_live` in promiscuous mode and snap length 65535 [web:11].  
+- Applies a capture filter of `ip` to focus on IPv4 traffic [web:9].  
+- Enters an infinite `pcap_loop`, decoding each packet and:
+  - Tracking TCP SYN counts per source
+  - Tracking ICMP echo requests
+  - Parsing HTTP, DNS, and TLS ClientHello SNI
+  - Emitting alerts to stdout and syslog  
+
+To stop it, press `Ctrl+C` in the terminal or manage it via your service supervisor.
+
+## Usage (from Python wrapper)
+
+You can also launch the sensor from a small Python 3 script, which is convenient for automation, orchestration, or later integration with other Python‑based tooling [web:27][web:28].
+
+Create `cheyenne_runner.py` in the repo root:
+
+```python
+import subprocess
+import sys
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python3 cheyenne_runner.py <tap_interface>")
+        sys.exit(1)
+
+    iface = sys.argv[1]
+    cmd = ["./cheyenne_nids", iface]
+
+    try:
+        proc = subprocess.Popen(cmd)
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
+
+if __name__ == "__main__":
+    main()
+```
+
+Run it like this:
+
+```bash
+python3 cheyenne_runner.py eth0
+```
+
+This keeps the C binary as the high‑performance sensor engine while Python acts as a simple launcher.
+
+## Output and Alerts
+
+Example outputs you may see:
+
+- TCP SYN scan alert:
+
+  ```text
+  [ALERT] Possible SYN scan from 192.0.2.10: 20 SYN in 10 s
+  ```
+
+- ICMP ping sweep alert:
+
+  ```text
+  [ALERT] Possible ICMP ping sweep (50 echo in 10 s)
+  ```
+
+- DNS tunneling heuristics:
+
+  ```text
+  [ALERT][DNS] DNS: high-entropy subdomains (possible tunneling) (src=192.0.2.15)
+  ```
+
+- HTTPS SNI meta
+
+  ```text
+  HTTPS SNI 192.0.2.5:54321 -> 198.51.100.10:443 host="example.com"
+  ```
+
+All alerts are also sent to syslog under the `cheyenne_nids` ident (`LOG_USER`), so you can forward them to your SIEM or log management stack [web:40].
+
+## Author
+
+Cheyenne NIDS was designed and implemented by **Max Gecse** as a free alternative that aims to deliver a commercial‑grade feature set for network intrusion detection.
+
+## Disclaimer
+
+Cheyenne is a research/learning‑oriented NIDS prototype. Use it responsibly, only on networks you own or have explicit permission to monitor, and review the code and thresholds before deploying it in production [web:40].
+```
+
+Sources
+[1] How to use pcap_open_live for a particular ethernet port https://stackoverflow.com/questions/38398357/how-to-use-pcap-open-live-for-a-particular-ethernet-port
+
+
+
+
+
+
+
 
