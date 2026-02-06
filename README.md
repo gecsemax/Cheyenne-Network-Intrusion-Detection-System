@@ -153,12 +153,7 @@ Cheyenne NIDS was designed and implemented by **Max Gecse** as a free alternativ
 
 ## Disclaimer
 
-Cheyenne is a research/learning‑oriented NIDS prototype. Use it responsibly, only on networks you own or have explicit permission to monitor, and review the code and thresholds before deploying it in production [web:40].
-```
-
-Sources
-[1] How to use pcap_open_live for a particular ethernet port https://stackoverflow.com/questions/38398357/how-to-use-pcap-open-live-for-a-particular-ethernet-port
-
+Cheyenne is a research/learning‑oriented NIDS prototype. Use it responsibly, only on networks you own or have explicit permission to monitor, and review the code and thresholds before deploying it in production.
 
 
 
