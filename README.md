@@ -1,7 +1,6 @@
-```markdown
 # Cheyenne Network Intrusion Detection System (NIDS)
 
-Cheyenne is a lightweight, TAP/SPAN‑based passive **network** intrusion detection system written in C on top of libpcap, created by Max Gecse.
+Cheyenne is a lightweight, TAP/SPAN‑based passive network intrusion detection system written in C on top of libpcap, created by Max Gecse.
 It is aimed to offer a feature set similar to commercial NIDS solutions, but as a free and open‑source project.
 
 ## Features
