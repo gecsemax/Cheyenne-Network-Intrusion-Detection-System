@@ -1,179 +1,292 @@
-# Cheyenne Network Intrusion System
+# Cheyenne NIDS/IPS
 
-Cheyenne is a lightweight, high‑performance network intrusion detection and prevention system written in C, created by **Max Gecse**. It aims to provide a feature set similar to commercial NIDS/IPS solutions, but as a free and open‑source project.
+Cheyenne is a single‑binary, experimental Network Intrusion Detection and Prevention System written in C. It focuses on being small, understandable, and easy to extend while borrowing ideas from larger engines like Suricata and Snort.
 
 ## Features
 
-- TAP/SPAN‑based passive sniffing using **libpcap**
-- Optional inline IPS mode using **NFQUEUE** (real packet drops)
-- Optional high‑speed capture mode using **PF_RING**
+- Passive NIDS using libpcap (TAP/SPAN / mirror port)
+- Inline IPS mode using NFQUEUE (real `DROP`/`ACCEPT` on Linux)
+- Optional high‑speed capture using PF_RING
 - IPv4 parsing with TCP, UDP, and ICMP support
-- Snort‑like rule engine:
-  - Actions: `alert`, `log`, `drop`
+- Simple Snort‑style rule engine:
+  - Actions: `alert`, `drop`, `log`
   - Protocols: `tcp`, `udp`, `icmp`, `ip`
-  - Header fields: `any` or single ports
-  - Payload options: multiple `content`, `nocase`, `depth`, `offset`
-- Built‑in detections:
-  - TCP SYN scan detection (time‑windowed per‑host counters)
-  - ICMP echo (ping) sweep detection
-  - DNS tunneling heuristics (long qnames, high‑entropy labels, unusual RR mix, NXDOMAIN storms, many unique subdomains)
-- Application‑layer visibility:
-  - HTTP request/response line parsing on TCP/80
-  - DNS over UDP and TCP
-  - HTTPS (TLS) ClientHello SNI extraction on TCP/443
-- JSON logging:
-  - Alert events (rule match, action, IPs, ports, protocol)
-  - Performance stats (pps, bps, average rule latency, drops)
-- Syslog integration for SIEM forwarding
+  - Ports: exact or `any`
+  - Payload keywords: `content`, `nocase`, `offset`, `depth`, `distance`, `within`
+- Basic detection logic:
+  - TCP SYN scan detection
+  - ICMP ping sweep detection
+  - HTTP request/response line logging (TCP/80)
+  - DNS over UDP and TCP parsing
+  - DNS tunneling heuristics (long names, high entropy labels, NXDOMAIN storms, many unique subdomains)
+  - TLS ClientHello SNI extraction (TCP/443)
+- JSON alerts and stats suitable for SIEM ingestion (e.g. Sentinel, Elastic, etc.)
+- Multi‑threaded processing with a packet queue and worker threads
+
+## Architecture Overview
+
+- **Capture layer**
+  - libpcap capture loop in passive mode
+  - NFQUEUE callback in inline mode
+  - PF_RING capture loop (optional)
+- **Dispatch**
+  - One capture thread enqueues packets into a ring buffer
+  - Worker threads dequeue and run protocol parsing + rule evaluation
+- **Detection**
+  - Per‑packet IPv4 + L4 parsing
+  - Stateless rule evaluation on application payload
+  - Stateful helpers for:
+    - SYN counts per source
+    - ICMP echo counts
+    - DNS per‑source statistics and per‑(src, base domain) tracking
+- **Output**
+  - JSON alerts: one line per event
+  - JSON stats: periodic performance metrics (pps, bps, rule evaluation latency)
 
 ## Build
 
-### Dependencies
+Cheyenne depends on:
 
-- Linux
 - `libpcap`
-- `pthread`
-- `libnetfilter_queue` (for NFQUEUE inline mode)
-- `PF_RING` library and kernel module (for PF_RING mode)
+- `libpthread`
+- `libnetfilter_queue` (for NFQUEUE IPS mode)
+- `libpfring` (optional, for PF_RING mode)
+- Standard C library headers and Linux networking headers
 
-Install (example on Debian/Ubuntu, PF_RING from ntop):
+Example build command (adjust libraries and include paths for your distro):
 
 ```bash
-sudo apt-get install libpcap-dev libnetfilter-queue-dev
-# PF_RING: follow ntop PF_RING install steps and ensure libpfring is available
-
-Compile
-Basic build with all features enabled:
-
-gcc -o cheyenne_nids cheyenne_nids.c \
+gcc -O2 -Wall -Wextra -o cheyenne_nids \
+    cheyenne_nids.c \
     -lpcap -lpthread -lnetfilter_queue -lpfring
+```
+
+If you do not have PF_RING or NFQUEUE installed, you can remove the corresponding libraries and, if needed, compile with small stubs or `#ifdef`s.
+
+## Running
+
+Cheyenne supports three main capture modes:
+
+- Passive pcap (default)
+- NFQUEUE inline IPS
+- PF_RING
+
+Below are example invocations; adapt to your environment.
+
+### Passive mode (libpcap)
+
+Monitor traffic on an interface using libpcap:
+
+```bash
+sudo ./cheyenne_nids -i eth0 -r rules.cheyenne
+```
+
+Typical options:
+
+- `-i <iface>`: network interface to sniff (e.g. `eth0`, `ens3`)
+- `-r <rules>`: rule file in Snort‑like syntax
+- `-w <workers>`: number of worker threads (optional)
+
+### NFQUEUE IPS mode
+
+To run inline with iptables / nftables:
+
+1. Add firewall rules to send traffic to a queue, for example:
+
+   ```bash
+   sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
+   ```
+
+2. Start Cheyenne in NFQUEUE mode (example):
+
+   ```bash
+   sudo ./cheyenne_nids -Q 0 -r rules.cheyenne
+   ```
+
+   Here:
+
+   - `-Q <num>` selects the NFQUEUE number
+   - `-r <rules>` loads detection rules
+
+Cheyenne will then accept or drop packets based on rule actions.
+
+### PF_RING mode
+
+When PF_RING is installed and configured, you can use a PF_RING interface:
+
+```bash
+sudo ./cheyenne_nids -P -i zc:eth0 -r rules.cheyenne
+```
+
+Exact option names or details may differ slightly depending on how you wire the arguments in `main()`; check the usage printed by the binary if you pass `-h` or invalid options.
+
+## Rule Syntax
+
+Rules follow a simplified Snort‑style format:
+
+```text
+<action> <proto> <src_ip> <src_port> <dir> <dst_ip> <dst_port> (<options>)
+```
+
+Examples:
+
+```text
+alert tcp any any -> any 80 (
+    msg:"Suspicious HTTP";
+    content:"GET";
+    content:"/evil";
+    distance:0;
+    within:50;
+    sid:1001;
+    rev:1;
+)
+
+drop udp any any -> any 53 (
+    msg:"DNS tunnel?";
+    content:"example.com";
+    nocase;
+    sid:2001;
+    rev:1;
+)
+```
+
+Supported components:
+
+- **Actions**
+  - `alert`: log an alert event
+  - `drop`: drop the packet (in inline mode) and log
+  - `log`: log only
+- **Protocols**
+  - `tcp`, `udp`, `icmp`, `ip`
+- **Addresses and ports**
+  - `any` or a single IP/port (CIDR/ranges are not yet implemented)
+- **Direction**
+  - `->` or `<>` (bidirectional flag is parsed, though IP matching is still basic)
+- **Payload keywords**
+  - `content:"..."`: match a byte string in the application payload
+  - `nocase`: case‑insensitive content matching
+  - `offset:n`: start searching at byte offset `n`
+  - `depth:n`: limit search to the first `n` bytes from the offset
+  - `distance:n`: for subsequent `content`, start search `n` bytes after the previous match start
+  - `within:n`: limit search window to `n` bytes after the previous match start
+
+Meta:
+
+- `msg:"..."`: human‑readable message
+- `sid:n`: unique rule ID
+- `rev:n`: revision
+
+Multiple `content` options in one rule are evaluated in order; `distance` and `within` are interpreted relative to the previous `content` match.
+
+## Output Format
+
+Cheyenne prints JSON on stdout, one object per line.
+
+### Alert events
+
+Example:
+
+```json
+{
+  "timestamp": "2026-02-09T00:00:00Z",
+  "event_type": "alert",
+  "action": "drop",
+  "src_ip": "10.0.0.10",
+  "src_port": 54321,
+  "dst_ip": "192.0.2.80",
+  "dst_port": 80,
+  "proto": "TCP",
+  "rule_sid": 1001,
+  "rule_rev": 1,
+  "rule_msg": "Suspicious HTTP"
+}
+```
+
+### Stats events
+
+Emitted periodically:
+
+```json
+{
+  "timestamp": "2026-02-09T00:00:05Z",
+  "event_type": "stats",
+  "pkt_total": 12345,
+  "bytes_total": 9876543,
+  "pps": 2469.00,
+  "bps": 158024688.00,
+  "pkt_alerted": 42,
+  "pkt_dropped": 10,
+  "rule_checks": 5000,
+  "rule_avg_usec": 3.21
+}
+```
+
+These can be shipped into SIEMs or log pipelines (e.g. `jq`, Logstash, Fluent Bit, etc.).
+
+## Limitations
+
+Cheyenne is intentionally minimal compared to full‑blown IDS/IPS engines:
+
+- No TCP stream reassembly or full flow tracking yet
+- IPv4 only; no IPv6 handling
+- Basic rule language (small subset of Snort/Suricata keywords)
+- No large community rule sets bundled
+- No management UI; configuration is via CLI flags and rule files
+
+It’s meant as:
+
+- A learning and experimentation platform
+- A small, auditable engine you can extend
+- A testbed for new detections (e.g. DNS tunneling heuristics)
+
+## Roadmap Ideas
+
+Potential future enhancements:
+
+- Flow table and TCP reassembly
+- IPv6 support
+- More rule keywords (flow, stream‑based matching, byte tests)
+- File extraction hooks
+- EVE‑style JSON for better Suricata/Snort interoperability
+- Configuration file for global settings
+
+## License
+
+MIT License
+
+Copyright (c) 2026 Max Gecse
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 
-Adjust include/library paths as needed if PF_RING is in a non‑standard location.
+WARNING AND DISCLAIMER
 
-Usage
+Cheyenne is experimental security software and is provided under the terms
+of the MIT license on an "AS IS" basis. It has NOT been formally verified,
+certified, or audited for production use.
 
-Cheyenne supports three capture modes:
-1. Passive mode (libpcap)
-Sniff a TAP/SPAN interface or regular NIC and log alerts:
+Running this software on live networks, especially in inline IPS mode, may
+cause unintended traffic disruption, performance degradation, or security
+gaps. You use Cheyenne entirely at your own risk. The authors and
+contributors assume no responsibility or liability for any damage, data
+loss, downtime, legal issues, or other consequences arising from the use,
+misuse, or inability to use this software.
 
-
-sudo ./cheyenne_nids eth0 /etc/cheyenne.rules 4
-
-Arguments:
-	•	 eth0 : interface to sniff
-	•	 /etc/cheyenne.rules : Snort‑like rules file
-	•	 4 : number of worker threads
-2. Inline IPS mode (NFQUEUE)
-Act as an inline IPS using iptables + NFQUEUE:
-
-sudo ./cheyenne_nids nfq /etc/cheyenne.rules 0 0
-sudo iptables -I FORWARD -j NFQUEUE --queue-num 0
-
-
-Arguments:
-	•	 nfq : enable NFQUEUE inline mode
-	•	 /etc/cheyenne.rules : rules file
-	•	 0 : worker threads (not used in the simple NFQUEUE loop)
-	•	 0 : NFQUEUE number
-Any packet matching a  drop  rule is actually dropped with  NF_DROP .
-3. High‑speed mode (PF_RING)
-Use PF_RING to capture from a 1/10Gbps interface:
-
-
-sudo ./cheyenne_nids pfring:eth0 /etc/cheyenne.rules 4
-
-
-	•	 pfring:eth0 : capture from  eth0  via PF_RING
-	•	Other arguments as in passive mode
-PF_RING must be correctly installed and the interface bound to PF_RING.
-Snort‑like rule syntax
-Cheyenne’s rule engine supports a useful subset of Snort syntax:
-
-
-<action> <proto> <src_ip> <src_port> <direction> <dst_ip> <dst_port> ( <options>; )
-
-
-Supported:
-	•	Actions:  alert ,  log ,  drop 
-	•	Protocols:  tcp ,  udp ,  icmp ,  ip 
-	•	IPs:  any  (IP/CIDR not yet implemented)
-	•	Ports:  any  or a single port number
-	•	Direction:  ->  or  <>  (bidirectional flag stored)
-Options (subset):
-	•	 msg:"text"; 
-	•	 sid:number; 
-	•	 rev:number; 
-	•	 content:"string";  (multiple per rule)
-	•	 nocase;  (applies to last  content )
-	•	 depth:number;  (applies to last  content )
-	•	 offset:number;  (applies to last  content )
-
-Example rules
-
-
-# HTTP GET detector on port 80
-alert tcp any any -> any 80 (msg:"HTTP GET detected"; sid:1000001; rev:1;
-    content:"GET "; depth:4; nocase;)
-
-# Login POST attempt
-alert tcp any any -> any 80 (msg:"Login POST attempt"; sid:1000002; rev:1;
-    content:"POST "; depth:5; nocase;
-    content:"/login"; nocase;)
-
-# Drop packets containing 'malware'
-drop tcp any any -> any any (msg:"Malware keyword detected"; sid:2000001; rev:1;
-    content:"malware"; nocase;)
-
-# DNS query for example.com
-alert udp any any -> any 53 (msg:"DNS query for example.com"; sid:3000001; rev:1;
-    content:"example.com"; nocase;)
-Place rules into  /etc/cheyenne.rules  (or another file you pass on the command line).
-
-
-JSON logs and SIEM integration
-Cheyenne emits structured JSON events to stdout:
-	•	 event_type:"alert"  for rule matches:
-
-
-{"timestamp":"2026-02-08T14:05:12Z","event_type":"alert","action":"drop",
- "src_ip":"192.0.2.10","src_port":54321,"dst_ip":"198.51.100.5","dst_port":80,
- "proto":"TCP","rule_sid":2000001,"rule_rev":1,"rule_msg":"Malware keyword detected"}
-
-
-	 event_type:"stats"  for periodic performance metrics:
-
-
-{"timestamp":"2026-02-08T14:05:15Z","event_type":"stats",
- "pkt_total":120000,"bytes_total":80000000,
- "pps":40000.00,"bps":640000000.00,
- "pkt_alerted":120,"pkt_dropped":5,
- "rule_checks":200000,"rule_avg_usec":1.20}
-
-
-{"timestamp":"2026-02-08T14:05:15Z","event_type":"stats",
- "pkt_total":120000,"bytes_total":80000000,
- "pps":40000.00,"bps":640000000.00,
- "pkt_alerted":120,"pkt_dropped":5,
- "rule_checks":200000,"rule_avg_usec":1.20}
-
-
-You can:
-	•	Pipe stdout into a log file:
-
-sudo ./cheyenne_nids nfq /etc/cheyenne.rules 0 0 \
-  | sudo tee -a /var/log/cheyenne_events.json
-
-	•	Use Azure Monitor Agent (AMA) to collect  /var/log/cheyenne_events.json  as a custom JSON log into an Azure Log Analytics workspace connected to Microsoft Sentinel, then build KQL queries and analytics rules on  CheyenneEvents_CL .
-Security and usage notes
-	•	Use Cheyenne only on networks you own or have explicit permission to monitor.
-	•	Review and tune thresholds (SYN scan, ping sweep, DNS heuristics) in this source before production use.
-	•	PF_RING and NFQUEUE modes require root privileges and careful iptables/routing design to avoid interrupting legitimate traffic.
-Cheyenne was designed and implemented by Max Gecse as a free alternative aiming to deliver a commercial‑grade feature set for network intrusion detection and prevention.
-
-
-
-
-
-
-
+Always test thoroughly in a controlled environment before deploying to any
+production or safety‑critical system.
